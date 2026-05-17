@@ -1,0 +1,112 @@
+rules_version = '2';
+
+// ─────────────────────────────────────────────────────────────
+//  ZUZZAPP — Firestore Security Rules
+//
+//  Collection map:
+//
+//  users/{uid}
+//    name, email, photoURL, role ("admin"|"member"), createdAt
+//
+//  coaches/{coachId}
+//    name, bio, photoURL, createdAt
+//
+//  exercises/{exerciseId}
+//    name, description, videoUrl, createdAt, createdBy (uid)
+//
+//  slots/{slotId}
+//    date (ISO string), startTime, endTime, capacity,
+//    coachId, coachName, bookedCount, createdBy (uid)
+//
+//  bookings/{bookingId}
+//    slotId, userId, userName, userPhotoURL, bookedAt
+//
+//  workoutPlans/{planId}
+//    userId, date (ISO string), createdBy (admin uid), createdAt
+//    exercises: [{ exerciseId, name, targetSets, targetReps, targetWeight }]
+//
+//  trainingLogs/{logId}
+//    userId, planId, exerciseId, exerciseName, date,
+//    sets: [{ setNumber, actualWeight, actualReps, loggedAt }],
+//    completedAt (nullable)
+// ─────────────────────────────────────────────────────────────
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── helpers ──────────────────────────────────────────────
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuth() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isOwner(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+
+    // ── users ─────────────────────────────────────────────────
+    // Members can read/write their own document; admins can read all.
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── coaches ───────────────────────────────────────────────
+    // Anyone authenticated can read; only admins write.
+    match /coaches/{coachId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ── exercises ─────────────────────────────────────────────
+    // Anyone authenticated can read; only admins write.
+    match /exercises/{exerciseId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ── slots ─────────────────────────────────────────────────
+    // Anyone authenticated can read; only admins write.
+    // bookedCount is incremented by booking logic (cloud function or
+    // client transaction) — members may only increment it, not set it arbitrarily.
+    match /slots/{slotId} {
+      allow read: if isAuth();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() ||
+        (isAuth() &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['bookedCount']));
+    }
+
+    // ── bookings ──────────────────────────────────────────────
+    // Members can create their own booking and read it;
+    // admins can read all and delete any.
+    match /bookings/{bookingId} {
+      allow read: if isOwner(resource.data.userId) || isAdmin();
+      allow create: if isAuth() && isOwner(request.resource.data.userId);
+      allow delete: if isOwner(resource.data.userId) || isAdmin();
+      allow update: if isAdmin();
+    }
+
+    // ── workoutPlans ──────────────────────────────────────────
+    // Target member can read their own plan; admins read/write all.
+    match /workoutPlans/{planId} {
+      allow read: if isOwner(resource.data.userId) || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ── trainingLogs ──────────────────────────────────────────
+    // Members write/read only their own logs; admins read all (for monitoring).
+    match /trainingLogs/{logId} {
+      allow read: if isOwner(resource.data.userId) || isAdmin();
+      allow create: if isAuth() && isOwner(request.resource.data.userId);
+      allow update: if isOwner(resource.data.userId);
+      allow delete: if isAdmin();
+    }
+  }
+}
