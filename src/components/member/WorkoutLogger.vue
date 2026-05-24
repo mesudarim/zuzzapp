@@ -86,15 +86,15 @@
                 <div class="grid grid-cols-2 gap-2">
                   <div class="space-y-1">
                     <label class="text-xs text-gray-500">{{ t('logger.weight') }}</label>
-                    <input v-model.number="getSetForm(ex.exerciseId).weight"
+                    <input v-model.number="getSetForm(ex.exerciseId, ex).weight"
                       type="number" min="0" step="0.5"
-                      :placeholder="ex.targetWeight" class="set-input" inputmode="decimal" />
+                      class="set-input" inputmode="decimal" />
                   </div>
                   <div class="space-y-1">
                     <label class="text-xs text-gray-500">{{ t('logger.reps') }}</label>
-                    <input v-model.number="getSetForm(ex.exerciseId).reps"
-                      type="number" min="0"
-                      :placeholder="ex.targetReps" class="set-input" inputmode="numeric" />
+                    <input v-model.number="getSetForm(ex.exerciseId, ex).reps"
+                      type="number" min="1"
+                      class="set-input" inputmode="numeric" />
                   </div>
                 </div>
                 <button class="btn-primary w-full text-sm"
@@ -134,8 +134,13 @@ const blocks = computed(() => plansStore.todayPlan ? planToBlocks(plansStore.tod
 
 // ── Per-exercise set form state ────────────────────────────
 const setForms = reactive({})
-function getSetForm(exerciseId) {
-  if (!setForms[exerciseId]) setForms[exerciseId] = { weight: '', reps: '' }
+function getSetForm(exerciseId, exercise) {
+  if (!setForms[exerciseId]) {
+    setForms[exerciseId] = {
+      weight: exercise?.targetWeight ?? 0,
+      reps:   exercise?.targetReps   || '',
+    }
+  }
   return setForms[exerciseId]
 }
 
@@ -145,7 +150,7 @@ function nextSetNumber(exerciseId) { return loggedSets(exerciseId).length + 1 }
 function isExDone(exerciseId)    { return !!logsStore.todayLogs[exerciseId]?.completedAt }
 function canLogSet(exerciseId) {
   const f = getSetForm(exerciseId)
-  return f.weight !== '' && f.reps !== '' && f.weight > 0 && f.reps > 0
+  return f.weight !== '' && !isNaN(Number(f.weight)) && Number(f.weight) >= 0 && Number(f.reps) > 0
 }
 
 // ── Superset helpers ───────────────────────────────────────
@@ -185,8 +190,6 @@ async function handleLogSet(exercise) {
       actualWeight: form.weight,
       actualReps:   form.reps,
     })
-    form.weight = ''
-    form.reps   = ''
 
     // Auto-mark superset exercise done when all rounds logged
     // We check in the parent block
@@ -218,8 +221,13 @@ const ExerciseCard = defineComponent({
     const setForms_      = reactive({})
     const pending        = ref(false)
 
-    function getForm(id) {
-      if (!setForms_[id]) setForms_[id] = { weight: '', reps: '' }
+    function getForm(id, ex) {
+      if (!setForms_[id]) {
+        setForms_[id] = {
+          weight: ex?.targetWeight ?? 0,
+          reps:   ex?.targetReps   || '',
+        }
+      }
       return setForms_[id]
     }
     function sets(id)  { return props.logs[id]?.sets ?? [] }
@@ -227,7 +235,7 @@ const ExerciseCard = defineComponent({
     function nextN(id) { return sets(id).length + 1 }
     function canLog(id) {
       const f = getForm(id)
-      return f.weight !== '' && f.reps !== '' && f.weight > 0 && f.reps > 0
+      return f.weight !== '' && !isNaN(Number(f.weight)) && Number(f.weight) >= 0 && Number(f.reps) > 0
     }
 
     function toEmbedUrl(url) {
@@ -240,7 +248,7 @@ const ExerciseCard = defineComponent({
     return () => {
       const ex   = props.exercise
       const exId = ex.exerciseId
-      const form = getForm(exId)
+      const form = getForm(exId, ex)
       const logged = sets(exId)
       const isDone = done(exId)
 
@@ -287,20 +295,26 @@ const ExerciseCard = defineComponent({
                   h('label', { class: 'text-xs text-gray-500' }, t('logger.weight')),
                   h('input', {
                     type: 'number', min: 0, step: 0.5,
-                    placeholder: ex.targetWeight, inputmode: 'decimal',
+                    inputmode: 'decimal',
                     class: 'set-input',
                     value: form.weight,
-                    onInput: (e) => { form.weight = parseFloat(e.target.value) },
+                    onInput: (e) => {
+                      const v = e.target.value.trim()
+                      form.weight = v === '' ? '' : parseFloat(v)
+                    },
                   }),
                 ]),
                 h('div', { class: 'space-y-1' }, [
                   h('label', { class: 'text-xs text-gray-500' }, t('logger.reps')),
                   h('input', {
-                    type: 'number', min: 0,
-                    placeholder: ex.targetReps, inputmode: 'numeric',
+                    type: 'number', min: 1,
+                    inputmode: 'numeric',
                     class: 'set-input',
                     value: form.reps,
-                    onInput: (e) => { form.reps = parseInt(e.target.value) },
+                    onInput: (e) => {
+                      const v = e.target.value.trim()
+                      form.reps = v === '' ? '' : parseInt(v)
+                    },
                   }),
                 ]),
               ]),
@@ -310,7 +324,7 @@ const ExerciseCard = defineComponent({
                 onClick: async () => {
                   if (!canLog(exId)) return
                   pending.value = true
-                  try { emit('log-set', ex); form.weight = ''; form.reps = '' }
+                  try { emit('log-set', ex) }
                   finally { pending.value = false }
                 },
               }, pending.value ? t('common.loading') : t('logger.logSet')),
